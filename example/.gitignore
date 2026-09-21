@@ -1,0 +1,14 @@
+# 本目录可以单独拷出去当独立练习仓库用，所以自带一份 .gitignore
+# （training_repo 仓库根目录那份是同一套规则的功能超集）。
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+*.key
+decisions*.jsonl
+
+# samples/requests.jsonl 是练习输入，必须保留

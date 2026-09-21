@@ -1,0 +1,156 @@
+"""把「读输入 -> 转发 -> JSON 容错 -> 校验 -> 兜底 -> 写输出」串成一条流水线。
+
+对外只有一条硬性约定：**读进来一行，就写出去一行合法 JSON 决策**。
+不管上游挂了、模型胡说、还是输入本身不是 JSON，都不允许把异常抛给调用方，
+也不允许输出半截/非法 JSON —— 否则下游（真实系统里的消息总线）会直接报错。
+"""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterable, List, Optional, TextIO, Tuple
+
+from .client import LlmClient
+from .config import GatewayConfig
+from .json_guard import JsonGuardError, dumps_json, loads_object
+from .rules import (
+    build_decision,
+    fallback_decision,
+    get_time,
+    is_valid_decision,
+    now_iso,
+    parse_request,
+    validate_decision,
+)
+
+__all__ = ["Stats", "JsonGateway"]
+
+
+@dataclass
+class Stats:
+    """跑完一轮之后的统计，方便观察容错到底起了多少作用。"""
+
+    lines: int = 0
+    ok: int = 0        # 模型的答案直接可用
+    repaired: int = 0  # 可用但被网关修正过（例如丢弃模型自报的 time）
+    fallback: int = 0  # 走了本地兜底出拳
+    bad_input: int = 0  # 输入行不是合法 JSON
+
+    def as_dict(self) -> Dict[str, int]:
+        return {
+            "lines": self.lines,
+            "ok": self.ok,
+            "repaired": self.repaired,
+            "fallback": self.fallback,
+            "bad_input": self.bad_input,
+        }
+
+
+class JsonGateway:
+    """一进一出的决策网关。"""
+
+    def __init__(
+        self,
+        config: GatewayConfig,
+        client: Optional[Any] = None,
+        log: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        self.config = config
+        self.log = log or (lambda message: print("[gateway] %s" % message, file=sys.stderr, flush=True))
+        if client is not None:
+            self.client = client
+        elif config.offline:
+            self.client = None  # 离线模式：只用本地规则出拳
+        else:
+            self.client = LlmClient(config, log=lambda message: self.log("上游: %s" % message))
+
+    # ------------------------------------------------------------------ #
+    # 核心编排
+    # ------------------------------------------------------------------ #
+    def handle_request(self, request: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        """核心编排：调用上游 -> JSON 容错 -> 合法性校验 -> 兜底。
+
+        返回 ``(合法决策, 说明列表)``，**永不抛异常**：
+
+        1. 有客户端时先 ``self.client.decide(request)`` 拿回原始文本；
+        2. ``loads_object`` 把任意文本整理成 dict（失败抛 :class:`JsonGuardError`）；
+        3. ``validate_decision`` 校验/修正成合法决策（内部也会兜底）；
+        4. 上面任何一步抛异常，就用 ``fallback_decision`` 本地出拳；
+        5. 出口再用 ``is_valid_decision`` 自检一次，不过就退化成 ``rock``。
+        """
+        notes: List[str] = []
+        decision: Optional[Dict[str, Any]] = None
+
+        if self.client is not None:
+            try:
+                content, meta = self.client.decide(request)
+                candidate = loads_object(content)
+                decision, notes = validate_decision(candidate, request)
+                self.log(
+                    "上游返回 %.2fs（attempt=%s, finish=%s, 含思维链=%s）"
+                    % (
+                        float(meta.get("latency_s") or 0.0),
+                        meta.get("attempt"),
+                        meta.get("finish_reason"),
+                        meta.get("has_reasoning"),
+                    )
+                )
+            except JsonGuardError as exc:
+                notes.append("模型输出无法整理成 JSON: %s" % exc)
+                self.log(str(exc))
+            except Exception as exc:  # noqa: BLE001 - 上游任何问题都不能影响出拳
+                notes.append("上游异常: %s" % exc)
+                self.log(str(exc))
+
+        if decision is None:
+            decision, extra = fallback_decision(request)
+            notes = notes + ["本地兜底"] + extra
+
+        if not is_valid_decision(decision):
+            decision = build_decision(get_time(request) or now_iso(), "rock")
+            notes.append("出口自检失败->rock")
+        return decision, notes
+
+    def handle_line(self, line: str) -> Tuple[Dict[str, Any], List[str]]:
+        """一行文本 -> ``(决策, 说明)``。
+
+        输入不是 JSON 时**不转发给上游**（坏数据不值得花钱），直接用「当前时间 + 兜底出拳」回一行。
+        """
+        notes: List[str] = []
+        text = line.strip()
+        try:
+            request = parse_request(text)
+        except Exception as exc:  # noqa: BLE001 - 坏输入也要有输出
+            notes.append("输入不是合法 JSON: %s" % exc)
+            decision, extra = fallback_decision({})
+            return decision, notes + extra
+        decision, extra = self.handle_request(request)
+        return decision, notes + extra
+
+    # ------------------------------------------------------------------ #
+    # 主循环
+    # ------------------------------------------------------------------ #
+    def run(self, reader: Iterable[str], writer: TextIO) -> Stats:
+        """逐行处理，写出 ``{"time": ..., "option": ...}``，返回统计。"""
+        stats = Stats()
+        for line in reader:
+            if not line.strip():
+                continue
+            stats.lines += 1
+            try:
+                decision, notes = self.handle_line(line)
+            except Exception as exc:  # noqa: BLE001 - 最后一道保险
+                decision, notes = build_decision(now_iso(), "rock"), ["内部异常: %s" % exc]
+            writer.write(dumps_json(decision) + "\n")
+            writer.flush()
+            if any("输入不是合法 JSON" in note for note in notes):
+                stats.bad_input += 1
+            if any("兜底" in note for note in notes):
+                stats.fallback += 1
+            elif notes:
+                stats.repaired += 1
+            else:
+                stats.ok += 1
+            self.log("第 %d 行 -> %s %s" % (stats.lines, dumps_json(decision), ("| " + "; ".join(notes)) if notes else ""))
+        return stats

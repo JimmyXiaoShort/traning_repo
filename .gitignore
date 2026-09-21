@@ -1,0 +1,46 @@
+# ── 机密：绝对不要提交 ────────────────────────────────────────────
+# API Key 只放在环境变量里：export DEEPSEEK_API_KEY=sk-xxx
+# 万一你写了 .env，至少别把它提交上去。
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+config.local.yaml
+
+# ── Python 运行产物 ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ── 虚拟环境 ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── 网关跑出来的文件 ─────────────────────────────────────────────
+# 例如：python run_gateway.py --input samples/requests.jsonl --output decisions.jsonl
+decisions*.jsonl
+*.out.jsonl
+
+# ── 编辑器 / 系统 ────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 说明：skeleton/ 与 example/ 里各有一份精简版 .gitignore，
+# 这样它们被单独拷出去当独立练习仓库时同样干净。
+# samples/*.jsonl 是练习输入，必须保留（上面的规则只匹配 decisions*.jsonl / *.out.jsonl）。

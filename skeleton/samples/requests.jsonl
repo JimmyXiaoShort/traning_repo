@@ -1,0 +1,7 @@
+{"time": "2026-01-01T00:00:00+00:00"}
+{"time": "2026-01-01T00:00:01+00:00", "history": ["rock"]}
+{"time": "2026-01-01T00:00:02+00:00", "history": ["rock", "paper", "paper"]}
+{"time": "2026-01-01T00:00:03+00:00", "history": ["scissor", "scissor", "scissor"]}
+{"history": ["paper"]}
+这不是 JSON，网关也必须回一行合法决策
+{"time": "2026-01-01T00:00:05+00:00", "history": ["rock", "scissor", "paper", "paper", "rock"]}
