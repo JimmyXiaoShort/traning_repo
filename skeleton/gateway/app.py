@@ -78,26 +78,53 @@ class JsonGateway:
     def handle_request(self, request: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         """核心编排：调用上游 -> JSON 容错 -> 合法性校验 -> 兜底。
 
-    返回 ``(合法决策, 说明列表)``，**永不抛异常**。提示：
+        返回 ``(合法决策, 说明列表)``，**永不抛异常**。提示：
 
-    1. ``notes: List[str] = []``、``decision: Optional[Dict[str, Any]] = None``；
-    2. 只有在 ``self.client is not None``（在线模式）时才调用上游：
-       * ``content, meta = self.client.decide(request)`` 拿回原始文本；
-       * ``candidate = loads_object(content)`` 把任意文本整理成 dict；
-       * ``decision, notes = validate_decision(candidate, request)`` 校验/修正；
-       * 可以顺手把 ``meta["latency_s"]`` 之类写进日志（可选）；
-    3. ``JsonGuardError``（模型输出整理不出来）和**其它任何异常**（上游超时、500……）
-       都要被接住：往 ``notes`` 里记一句原因，然后 ``decision`` 保持为 ``None``；
-    4. ``decision is None`` 时用 ``fallback_decision(request)`` 本地出拳，
-       ``notes`` 里加上 ``"本地兜底"`` 和兜底自己的说明；
-    5. 出口用 ``is_valid_decision(decision)`` 再自检一次，
-       万一不合法就退化成 ``build_decision(get_time(request) or now_iso(), "rock")``，
-       ``notes`` 里加上 ``"出口自检失败->rock"``；
-    6. 返回 ``(decision, notes)``。
+        1. ``notes: List[str] = []``、``decision: Optional[Dict[str, Any]] = None``；
+        2. 只有在 ``self.client is not None``（在线模式）时才调用上游：
+        * ``content, meta = self.client.decide(request)`` 拿回原始文本；
+        * ``candidate = loads_object(content)`` 把任意文本整理成 dict；
+        * ``decision, notes = validate_decision(candidate, request)`` 校验/修正；
+        * 可以顺手把 ``meta["latency_s"]`` 之类写进日志（可选）；
+        3. ``JsonGuardError``（模型输出整理不出来）和**其它任何异常**（上游超时、500……）
+        都要被接住：往 ``notes`` 里记一句原因，然后 ``decision`` 保持为 ``None``；
+        4. ``decision is None`` 时用 ``fallback_decision(request)`` 本地出拳，
+        ``notes`` 里加上 ``"本地兜底"`` 和兜底自己的说明；
+        5. 出口用 ``is_valid_decision(decision)`` 再自检一次，
+        万一不合法就退化成 ``build_decision(get_time(request) or now_iso(), "rock")``，
+        ``notes`` 里加上 ``"出口自检失败->rock"``；
+        6. 返回 ``(decision, notes)``。
 
-    目标：``tests/test_app.py`` 的 ``test_handle_request_*`` 与 ``test_run_*`` 通过。
+        目标：``tests/test_app.py`` 的 ``test_handle_request_*`` 与 ``test_run_*`` 通过。
         """
-        raise NotImplementedError("TODO 10：实现 handle_request（见函数文档里的提示）")
+        notes: List[str] = []
+        decision: Optional[Dict[str, Any]] = None
+        
+        try:
+            if self.client is not None:
+                # 在线模式：调用上游服务
+                content, meta = self.client.decide(request)
+                candidate = loads_object(content)
+                decision, notes = validate_decision(candidate, request)
+                
+        except JsonGuardError as e:
+            notes.append(f"模型输出整理失败: {str(e)}")
+        except Exception as e:
+            notes.append(f"上游异常: {str(e)}")
+        
+        # 如果决策为空，使用本地兜底
+        if decision is None:
+            decision, extra = fallback_decision(request)
+            notes.extend(extra)
+            notes.append("本地兜底")
+        
+        # 最终自检
+        if not is_valid_decision(decision):
+            time_value = get_time(request) or now_iso()
+            decision = build_decision(time_value, "rock")
+            notes.append("出口自检失败->rock")
+        
+        return decision, notes
 
     # ------------------------------------------------------------------ #
     # 已写好：输入解析与主循环（不用改）

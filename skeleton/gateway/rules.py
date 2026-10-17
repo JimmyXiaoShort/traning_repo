@@ -144,7 +144,15 @@ def normalize_option(value: Any) -> Optional[str]:
 
     目标：``tests/test_rules.py`` 的 ``test_normalize_option_*`` 与 ``test_aliases_*`` 通过。
     """
-    raise NotImplementedError("TODO 4：实现 normalize_option（见函数文档里的提示）")
+    # 检查输入是否为字符串
+    if not isinstance(value, str):
+        return None
+    
+    # 标准化处理：去除首尾空白并转换为小写
+    normalized = value.strip().lower()
+    
+    # 在 ALIASES 中查找对应的标准化选项
+    return ALIASES.get(normalized)
 
 
 # --------------------------------------------------------------------------- #
@@ -188,8 +196,37 @@ def validate_decision(candidate: Any, request: Dict[str, Any]) -> Tuple[Dict[str
 
     目标：``tests/test_rules.py`` 的 ``test_validate_decision_*`` 通过。
     """
-    raise NotImplementedError("TODO 5：实现 validate_decision（见函数文档里的提示）")
-
+    reasons = []
+    
+    # 1. 检查 candidate 是否为字典
+    if not isinstance(candidate, dict):
+        decision, reasons = fallback_decision(request)
+        reasons.extend(["非对象->兜底"])
+        return decision, reasons
+    
+    # 2. 验证 option 是否有效
+    option = normalize_option(candidate.get("option"))
+    if option is None:
+        decision, reasons = fallback_decision(request)
+        reasons.extend(["option 非法->兜底"])
+        return fallback_decision(request)
+    
+    # 3. 处理 time 字段
+    request_time = get_time(request)
+    if request_time is not None:
+        time_value = request_time
+        if "time" in candidate and candidate["time"] != request_time:
+            reasons.append("丢弃模型的 time")
+    else:
+        if "time" in candidate:
+            time_value = candidate["time"]
+            reasons.append("请求无 time->用模型的 time")
+        else:
+            time_value = now_iso()
+            reasons.append("请求无 time->用当前时间")
+    
+    # 4. 构建最终决策
+    return build_decision(time_value, option), reasons
 
 # --------------------------------------------------------------------------- #
 # TODO 6：本地兜底
@@ -215,7 +252,23 @@ def fallback_decision(request: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str
 
     目标：``tests/test_rules.py`` 的 ``test_fallback_decision_*`` 通过。
     """
-    raise NotImplementedError("TODO 6：实现 fallback_decision（见函数文档里的提示）")
+    # 获取历史记录
+    history = history_of(request)
+    reasons = []
+    
+    # 根据历史记录决定出拳
+    if history:
+        option = counter_to(history[-1])
+        reasons.append(f"兜底:counter({history[-1]})")
+    else:
+        option = "rock"
+        reasons.append("兜底:rock")
+    
+    # 获取时间信息
+    time_value = get_time(request) or now_iso()
+    
+    # 构建决策
+    return build_decision(time_value, option), reasons
 
 
 # --------------------------------------------------------------------------- #

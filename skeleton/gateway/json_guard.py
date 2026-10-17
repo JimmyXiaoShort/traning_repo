@@ -70,7 +70,24 @@ def strip_code_fence(text: str) -> str:
 
     目标：``tests/test_json_guard.py`` 里的 5 个 ``test_strip_code_fence_*`` 通过。
     """
-    raise NotImplementedError("TODO 1：实现 strip_code_fence（见函数文档里的提示）")
+    parts = text.split("```")
+    first_valid = None  # 初始化为 None
+    
+    for i in range(1, len(parts), 2):  # 遍历所有代码块内部（奇数索引）
+        content = parts[i]
+        # 检查是否有语言标记行（如 "json" 或 "JSON"）
+        lines = content.split('\n', 1)
+        if len(lines) > 0 and lines[0].strip() in ('json', 'JSON', 'js') and '{' not in lines[0]:
+            content = lines[1] if len(lines) > 1 else ""
+        # 如果内容以 { 开头，直接返回
+        if content.strip().startswith('{'):
+            return content.strip()
+        # 如果内容非空，记录下来
+        if content.strip():
+            first_valid = content.strip()
+    
+    # 返回第一个非空片段或原文本
+    return first_valid if first_valid is not None else text
 
 
 # --------------------------------------------------------------------------- #
@@ -89,7 +106,36 @@ def find_first_json_object(text: str) -> Optional[str]:
 
     目标：``tests/test_json_guard.py`` 里的 6 个 ``test_find_first_json_object_*`` 通过。
     """
-    raise NotImplementedError("TODO 2：实现 find_first_json_object（见函数文档里的提示）")
+    depth = 0
+    in_string = False
+    escaped = False
+    start = -1
+    stack = []
+
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+        else:
+            if char == '"':
+                in_string = True
+            elif char == '{':
+                if depth == 0:
+                    start = index
+                depth += 1
+                stack.append(index)
+            elif char == '}':
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0:
+                        return text[start:index + 1]
+                    stack.pop()
+    
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -222,7 +268,25 @@ def repair_json_text(text: str) -> str:
 
     目标：``tests/test_json_guard.py`` 里的 9 个 ``test_repair_*`` 通过。
     """
-    raise NotImplementedError("TODO 3：实现 repair_json_text（见函数文档里的提示）")
+    # 1. 去掉注释并去除首尾空白
+    text = _strip_comments(text).strip()
+    
+    # 2. 替换 Python 的 None/True/False 为 JSON 格式
+    text = _PY_LITERAL_RE.sub(lambda m: _PY_LITERALS[m.group(0)], text)
+    
+    # 3. 去掉尾随逗号（在 } 或 ] 前面的逗号）
+    text = re.sub(r',(\s*[}\]])', r'\1', text)
+    
+    # 4. 去掉结尾多余的逗号和空白
+    text = text.rstrip().rstrip(',')
+    
+    # 5. 统一引号并转义裸换行
+    text = _normalize_strings(text)
+    
+    # 6. 补齐缺失的右引号和右括号
+    text = _close_unfinished(text)
+    
+    return text
 
 
 # --------------------------------------------------------------------------- #
