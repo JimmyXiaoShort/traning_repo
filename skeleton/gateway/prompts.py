@@ -15,7 +15,7 @@ OPTION_HINT = 'rock（石头）、scissor（剪刀）、paper（布）'
 SYSTEM_PROMPT = (
     "你在玩石头剪刀布（rock-paper-scissors），负责为当前这一轮出拳。\n"
     "输入是一个 JSON 对象，里面有一个字符串字段 time（本轮时间），可能还有可选数组 history"
-    "（对手的历史出拳，按时间从旧到新，元素为 rock/scissor/paper）。\n"
+    "（对手的历史出拳opponent_history，你的历史出拳 my_history，按时间从旧到新，元素为 rock/scissor/paper）。\n"
     "胜负规则：rock 赢 scissor，scissor 赢 paper，paper 赢 rock。\n"
     "你必须只输出一个 JSON 对象，恰好包含两个键：\n"
     '  "time"：字符串，与输入里的 time 完全一致；\n'

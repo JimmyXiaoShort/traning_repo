@@ -115,19 +115,33 @@ def get_time(request: Dict[str, Any]) -> Optional[str]:
     return normalize_time(request.get("time"))
 
 
-def history_of(request: Dict[str, Any]) -> List[str]:
-    """取对手历史出拳：只保留能识别的元素，最多保留最近 10 个。"""
+def history_of(request: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    """取双方历史出拳：返回 (对手历史, 我方历史)，只保留能识别的元素，最多保留最近 10 个。"""
     if not isinstance(request, dict):
-        return []
-    raw = request.get("history")
-    if not isinstance(raw, list):
-        return []
-    history: List[str] = []
-    for item in raw:
-        option = normalize_option(item)
-        if option is not None:
-            history.append(option)
-    return history[-_MAX_HISTORY:]
+        return [], []
+    
+    # 获取对手历史
+    opponent_history = []
+    raw_opponent = request.get("opponent_history")
+    if isinstance(raw_opponent, list):
+        for item in raw_opponent:
+            option = normalize_option(item)
+            if option is not None:
+                opponent_history.append(option)
+        opponent_history = opponent_history[-_MAX_HISTORY:]
+    
+    # 获取我方历史
+    my_history = []
+    raw_my = request.get("my_history")
+    if isinstance(raw_my, list):
+        for item in raw_my:
+            option = normalize_option(item)
+            if option is not None:
+                my_history.append(option)
+        my_history = my_history[-_MAX_HISTORY:]
+    
+    return opponent_history, my_history
+
 
 
 # --------------------------------------------------------------------------- #
@@ -253,13 +267,13 @@ def fallback_decision(request: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str
     目标：``tests/test_rules.py`` 的 ``test_fallback_decision_*`` 通过。
     """
     # 获取历史记录
-    history = history_of(request)
+    opponent_history, my_history = history_of(request)
     reasons = []
     
     # 根据历史记录决定出拳
-    if history:
-        option = counter_to(history[-1])
-        reasons.append(f"兜底:counter({history[-1]})")
+    if opponent_history and my_history:
+        option = counter_to(opponent_history[-1])
+        reasons.append(f"兜底:counter({opponent_history[-1]})")
     else:
         option = "rock"
         reasons.append("兜底:rock")
